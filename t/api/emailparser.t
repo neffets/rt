@@ -2,12 +2,20 @@
 use strict;
 use warnings;
 
-use RT::Test nodb => 1, tests => 10;
+use RT::Test tests => 11;
 
-RT->Config->Set( RTAddressRegexp => qr/^rt\@example.com$/i );
-
+# create a user with a blank email address
+RT::Test->load_or_create_user(
+    Name => 'testuser',
+    EmailAddress => '',
+);
 
 ok(require RT::EmailParser);
+
+RT->Config->Set( RTAddressRegexp => undef );
+is(RT::EmailParser::IsRTAddress("",""),undef, "Empty emails don't match users without email addresses" );
+
+RT->Config->Set( RTAddressRegexp => qr/^rt\@example.com$/i );
 
 is(RT::EmailParser::IsRTAddress("","rt\@example.com"),1, "Regexp matched rt address" );
 is(RT::EmailParser::IsRTAddress("","frt\@example.com"),undef, "Regexp didn't match non-rt address" );
