@@ -1355,6 +1355,7 @@ sub CreateTicket {
             my $cfid = $1;
 
             my $cf = RT::CustomField->new( $session{'CurrentUser'} );
+            $cf->SetContextObject( $Queue );
             $cf->Load($cfid);
             unless ( $cf->id ) {
                 $RT::Logger->error( "Couldn't load custom field #" . $cfid );
