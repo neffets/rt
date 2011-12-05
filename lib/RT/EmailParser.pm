@@ -330,6 +330,8 @@ sub IsRTAddress {
     my $self = shift;
     my $address = shift;
 
+    return undef unless defined($address) and $address =~ /\S/;
+
     if ( my $address_re = RT->Config->Get('RTAddressRegexp') ) {
         return $address =~ /$address_re/i ? 1 : undef;
     }
@@ -341,8 +343,6 @@ sub IsRTAddress {
     if ( my $comment_address = RT->Config->Get('CommentAddress') ) {
         return 1 if lc $comment_address eq lc $address;
     }
-
-    return undef unless defined($address) and $address =~ /\S/;
 
     my $queue = RT::Queue->new( RT->SystemUser );
     $queue->LoadByCols( CorrespondAddress => $address );

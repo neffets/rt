@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 
-use RT::Test tests => 12;
+use RT::Test tests => 13;
 
 ok(require RT::EmailParser);
 
@@ -14,6 +14,10 @@ $queue->Load('General');
 $queue->SetCorrespondAddress(" ");
 is(RT::EmailParser::IsRTAddress(""," "),undef, 'Catch emails with only whitespace' );
 $queue->SetCorrespondAddress("");
+
+RT->Config->Set( CorrespondAddress => " " );
+is(RT::EmailParser::IsRTAddress(""," "),undef, 'Catch emails with only whitespace' );
+RT->Config->Set( CorrespondAddress => "");
 
 RT->Config->Set( RTAddressRegexp => qr/^rt\@example.com$/i );
 
