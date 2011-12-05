@@ -2,12 +2,18 @@
 use strict;
 use warnings;
 
-use RT::Test tests => 11;
+use RT::Test tests => 12;
 
 ok(require RT::EmailParser);
 
 RT->Config->Set( RTAddressRegexp => undef );
 is(RT::EmailParser::IsRTAddress("",""),undef, "Empty emails from users don't match queues without email addresses" );
+
+my $queue = RT::Queue->new($RT::SystemUser);
+$queue->Load('General');
+$queue->SetCorrespondAddress(" ");
+is(RT::EmailParser::IsRTAddress(""," "),undef, 'Catch emails with only whitespace' );
+$queue->SetCorrespondAddress("");
 
 RT->Config->Set( RTAddressRegexp => qr/^rt\@example.com$/i );
 

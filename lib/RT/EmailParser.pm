@@ -342,7 +342,7 @@ sub IsRTAddress {
         return 1 if lc $comment_address eq lc $address;
     }
 
-    return undef unless length($address);
+    return undef unless defined($address) and $address =~ /\S/;
 
     my $queue = RT::Queue->new( RT->SystemUser );
     $queue->LoadByCols( CorrespondAddress => $address );
