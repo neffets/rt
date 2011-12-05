@@ -4,16 +4,10 @@ use warnings;
 
 use RT::Test tests => 11;
 
-# create a user with a blank email address
-RT::Test->load_or_create_user(
-    Name => 'testuser',
-    EmailAddress => '',
-);
-
 ok(require RT::EmailParser);
 
 RT->Config->Set( RTAddressRegexp => undef );
-is(RT::EmailParser::IsRTAddress("",""),undef, "Empty emails don't match users without email addresses" );
+is(RT::EmailParser::IsRTAddress("",""),undef, "Empty emails from users don't match queues without email addresses" );
 
 RT->Config->Set( RTAddressRegexp => qr/^rt\@example.com$/i );
 
