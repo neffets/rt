@@ -97,7 +97,9 @@ if ( $ARGS{'UpdateSummaryRows'} ) {
 $ARGS{'SummaryRows'} ||= $user->Preferences('SummaryRows', RT->Config->Get('DefaultSummaryRows'));
 
 if ($ARGS{Reset}) {
-    my ($ok, $msg) = $user->SetPreferences('HomepageSettings', {});
+    my $attr = RT::Attribute->new($session{CurrentUser});
+    $attr->LoadByNameAndObject( Object => $user, Name => 'Pref-HomepageSettings' );
+    my ($ok, $msg) = $attr->Delete;
     push @results, $ok ? loc('Preferences saved.') : $msg;
     delete $session{'my_rt_portlets'};
 }
