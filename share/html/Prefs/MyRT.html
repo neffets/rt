@@ -77,6 +77,12 @@
 <input type="submit" class="button" value="<% loc('Reset to default') %>">
 </form>
 </&>
+<&|/Widgets/TitleBox, title => loc("Reset System Saved Search Adjustments") &>
+<form method="post" action="MyRT.html">
+<input type="hidden" name="ResetSavedSearches" value="1" />
+<input type="submit" class="button" value="<% loc('Reset to default') %>">
+</form>
+</&>
 
 
 <%INIT>
@@ -109,6 +115,18 @@ if ($ARGS{Reset}) {
     push @results, loc('Preferences saved.') if $hp_ok and $sr_ok;
 
     delete $session{'my_rt_portlets'};
+}
+
+if ($ARGS{ResetSavedSearches}) {
+    my $attrs = $user->Attributes;
+    while (my $attr = $attrs->Next) {
+        if ($attr->Name =~ /^Pref-RT::Attribute-\d+$/) {
+            my ($ok, $msg) = $attr->Delete;
+            push @results, $msg unless $ok;
+        }
+    }
+
+    push @results, loc('Preferences saved.');
 }
 
 my $portlets;
