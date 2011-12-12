@@ -99,8 +99,15 @@ $ARGS{'SummaryRows'} ||= $user->Preferences('SummaryRows', RT->Config->Get('Defa
 if ($ARGS{Reset}) {
     my $attr = RT::Attribute->new($session{CurrentUser});
     $attr->LoadByNameAndObject( Object => $user, Name => 'Pref-HomepageSettings' );
-    my ($ok, $msg) = $attr->Delete;
-    push @results, $ok ? loc('Preferences saved.') : $msg;
+    my ($hp_ok, $msg) = $attr->Delete;
+    push @results, $msg unless $hp_ok;
+
+    $attr->LoadByNameAndObject( Object => $user, Name => 'Pref-SummaryRows' );
+    (my $sr_ok, $msg) = $attr->Delete;
+    push @results, $msg unless $sr_ok;
+
+    push @results, loc('Preferences saved.') if $hp_ok and $sr_ok;
+
     delete $session{'my_rt_portlets'};
 }
 
