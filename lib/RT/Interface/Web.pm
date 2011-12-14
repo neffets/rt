@@ -276,11 +276,18 @@ sub HandleRequest {
             # Specially handle /index.html so that we get a nicer URL
             elsif ( $m->request_comp->path eq '/index.html' ) {
                 my $next = SetNextPage(RT->Config->Get('WebURL'));
-                $m->comp('/NoAuth/Login.html', next => $next, actions => [$msg]);
+                $m->comp(
+                    (MobileClient() && !$ARGS->{NotMobile} ? '/m/login' : '/NoAuth/Login.html'),
+                    next    => $next,
+                    actions => [$msg || ()]
+                );
                 $m->abort;
             }
             else {
-                TangentForLogin(results => ($msg ? LoginError($msg) : undef));
+                TangentForLogin(
+                    results => ( $msg ? LoginError($msg) : undef ),
+                    ( MobileClient() && !$ARGS->{NotMobile} ? (mobile => 1) : () ),
+                );
             }
         }
     }
