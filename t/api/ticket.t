@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 use RT;
-use RT::Test tests => 87;
+use RT::Test tests => 88;
 
 
 {
@@ -254,3 +254,19 @@ ok(!$id,$msg);
 
 }
 
+diag("Test ticket types with different cases");
+{
+my $t = RT::Ticket->new(RT->SystemUser);
+$t->Create(
+    Queue => 'general',
+    Subject => 'type test 1',
+    Type => 'Ticket',
+);
+my $t2 = RT::Ticket->new(RT->SystemUser);
+$t2->Create(
+    Queue => 'general',
+    Subject => 'type test 2',
+    Type => 'ticket',
+);
+is($t->Type, $t2->Type, "Ticket types are lowercased, therefore identical");
+}

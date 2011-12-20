@@ -472,7 +472,7 @@ sub Create {
         TimeWorked      => $args{'TimeWorked'},
         TimeEstimated   => $args{'TimeEstimated'},
         TimeLeft        => $args{'TimeLeft'},
-        Type            => $args{'Type'},
+        Type            => lc $args{'Type'},
         Starts          => $Starts->ISO,
         Started         => $Started->ISO,
         Resolved        => $Resolved->ISO,
@@ -717,6 +717,13 @@ sub Create {
     }
 }
 
+sub SetType {
+    my $self = shift;
+    my $value = shift;
+
+    # Force lowercase
+    return $self->_Set(Field => 'Type', Value => lc($value), @_);
+}
 
 
 
