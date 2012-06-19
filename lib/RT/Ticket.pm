@@ -1239,7 +1239,7 @@ sub DeleteWatcher {
             }
         }
         else {
-            $RT::Logger->warn("$self -> DeleteWatcher got passed a bogus type");
+            $RT::Logger->warning("$self -> DeleteWatcher got passed a bogus type");
             return ( 0,
                      $self->loc('Error in parameters to Ticket->DeleteWatcher') );
         }
@@ -1783,7 +1783,7 @@ sub SetQueue {
         # On queue change, change queue for reminders too
         my $reminder_collection = $self->Reminders->Collection;
         while ( my $reminder = $reminder_collection->Next ) {
-            my ($status, $msg) = $reminder->SetQueue($NewQueue);
+            my ($status, $msg) = $reminder->_Set( Field => 'Queue', Value => $NewQueueObj->Id(), RecordTransaction => 0 );
             $RT::Logger->error('Queue change failed for reminder #' . $reminder->Id . ': ' . $msg) unless $status;
         }
     }
@@ -1816,7 +1816,7 @@ sub QueueObj {
 
 Takes nothing. Returns SubjectTag for this ticket. Includes
 queue's subject tag or rtname if that is not set, ticket
-id and braces, for example:
+id and brackets, for example:
 
     [support.example.com #123456]
 
@@ -2357,7 +2357,7 @@ sub _Links {
     my $links = $self->{ $cache_key }
               = RT::Links->new( $self->CurrentUser );
     unless ( $self->CurrentUserHasRight('ShowTicket') ) {
-        $links->Limit( FIELD => 'id', VALUE => 0 );
+        $links->Limit( FIELD => 'id', VALUE => 0, SUBCLAUSE => 'acl' );
         return $links;
     }
 
@@ -2890,61 +2890,15 @@ sub SetOwner {
         return ( 0, $self->loc("That user does not exist") );
     }
 
-
-    # must have ModifyTicket rights
-    # or TakeTicket/StealTicket and $NewOwner is self
-    # see if it's a take
-    if ( $OldOwnerObj->Id == RT->Nobody->Id ) {
-        unless (    $self->CurrentUserHasRight('ModifyTicket')
-                 || $self->CurrentUserHasRight('TakeTicket') ) {
-            $RT::Handle->Rollback();
-            return ( 0, $self->loc("Permission Denied") );
-        }
-    }
-
-    # see if it's a steal
-    elsif (    $OldOwnerObj->Id != RT->Nobody->Id
-            && $OldOwnerObj->Id != $self->CurrentUser->id ) {
-
-        unless (    $self->CurrentUserHasRight('ModifyTicket')
-                 || $self->CurrentUserHasRight('StealTicket') ) {
-            $RT::Handle->Rollback();
-            return ( 0, $self->loc("Permission Denied") );
-        }
-    }
-    else {
-        unless ( $self->CurrentUserHasRight('ModifyTicket') ) {
-            $RT::Handle->Rollback();
-            return ( 0, $self->loc("Permission Denied") );
-        }
-    }
-
-    # If we're not stealing and the ticket has an owner and it's not
-    # the current user
-    if ( $Type ne 'Steal' and $Type ne 'Force'
-         and $OldOwnerObj->Id != RT->Nobody->Id
-         and $OldOwnerObj->Id != $self->CurrentUser->Id )
-    {
+    if ( !$self->_CurrentUserHasRightToSetOwner ) {
         $RT::Handle->Rollback();
-        return ( 0, $self->loc("You can only take tickets that are unowned") )
-            if $NewOwnerObj->id == $self->CurrentUser->id;
-        return (
-            0,
-            $self->loc("You can only reassign tickets that you own or that are unowned" )
-        );
+        return ( 0, $self->loc("Permission Denied") );
     }
 
-    #If we've specified a new owner and that user can't modify the ticket
-    elsif ( !$NewOwnerObj->HasRight( Right => 'OwnTicket', Object => $self ) ) {
+    my ( $val, $msg ) = $self->_IsProposedOwnerChangeValid( $NewOwnerObj, $Type );
+    if ( !$val ) {
         $RT::Handle->Rollback();
-        return ( 0, $self->loc("That user may not own tickets in that queue") );
-    }
-
-    # If the ticket has an owner and it's the new owner, we don't need
-    # To do anything
-    elsif ( $NewOwnerObj->Id == $OldOwnerObj->Id ) {
-        $RT::Handle->Rollback();
-        return ( 0, $self->loc("That user already owns that ticket") );
+        return ( $val, $msg );
     }
 
     # Delete the owner in the owner group, then add a new one
@@ -2972,7 +2926,7 @@ sub SetOwner {
     # We call set twice with slightly different arguments, so
     # as to not have an SQL transaction span two RT transactions
 
-    my ( $val, $msg ) = $self->_Set(
+    ( $val, $msg ) = $self->_Set(
                       Field             => 'Owner',
                       RecordTransaction => 0,
                       Value             => $NewOwnerObj->Id,
@@ -3008,7 +2962,69 @@ sub SetOwner {
     return ( $val, $msg );
 }
 
+sub _CurrentUserHasRightToSetOwner {
+    my $self = shift;
+    # must have ModifyTicket rights
+    # or TakeTicket/StealTicket and $NewOwner is self
+    # see if it's a take
+    my $OldOwnerObj = $self->OwnerObj;
+    if ( $OldOwnerObj->Id == RT->Nobody->Id ) {
+        unless (    $self->CurrentUserHasRight('ModifyTicket')
+                 || $self->CurrentUserHasRight('TakeTicket') ) {
+            return 0;
+        }
+    }
 
+    # see if it's a steal
+    elsif (    $OldOwnerObj->Id != RT->Nobody->Id
+            && $OldOwnerObj->Id != $self->CurrentUser->id ) {
+
+        unless (    $self->CurrentUserHasRight('ModifyTicket')
+                 || $self->CurrentUserHasRight('StealTicket') ) {
+            return 0;
+        }
+    }
+    else {
+        unless ( $self->CurrentUserHasRight('ModifyTicket') ) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+sub _IsProposedOwnerChangeValid {
+    my $self        = shift;
+    my $NewOwnerObj = shift;
+    my $Type        = shift;
+
+    my $OldOwnerObj = $self->OwnerObj;
+
+    # If we're not stealing and the ticket has an owner and it's not
+    # the current user
+    if (     $Type ne 'Steal' and $Type ne 'Force'
+         and $OldOwnerObj->Id != RT->Nobody->Id
+         and $OldOwnerObj->Id != $self->CurrentUser->Id ) {
+        if ( $NewOwnerObj->id == $self->CurrentUser->id) {
+            return ( 0, $self->loc("You can only take tickets that are unowned") )
+        }
+        else {
+            return ( 0, $self->loc( "You can only reassign tickets that you own or that are unowned"));
+        }
+    }
+
+    #If we've specified a new owner and that user can't modify the ticket
+    elsif ( !$NewOwnerObj->HasRight( Right => 'OwnTicket', Object => $self ) )
+    {
+        return ( 0, $self->loc("That user may not own tickets in that queue") );
+    }
+
+    # If the ticket has an owner and it's the new owner, we don't need
+    # To do anything
+    elsif ( $NewOwnerObj->Id == $OldOwnerObj->Id ) {
+        return ( 0, $self->loc("That user already owns that ticket") );
+    }
+    return (1, undef);
+}
 
 =head2 Take
 
@@ -3086,11 +3102,11 @@ sub ValidateStatus {
 
 =head2 SetStatus STATUS
 
-Set this ticket\'s status. STATUS can be one of: new, open, stalled, resolved, rejected or deleted.
+Set this ticket's status.
 
 Alternatively, you can pass in a list of named parameters (Status => STATUS, Force => FORCE, SetStarted => SETSTARTED ).
 If FORCE is true, ignore unresolved dependencies and force a status change.
-if SETSTARTED is true( it's the default value), set Started to current datetime if Started 
+if SETSTARTED is true (it's the default value), set Started to current datetime if Started 
 is not set and the status is changed from initial to not initial. 
 
 =cut
@@ -3513,6 +3529,16 @@ sub CurrentUserHasRight {
 }
 
 
+=head2 CurrentUserCanSee
+
+Returns true if the current user can see the ticket, using ShowTicket
+
+=cut
+
+sub CurrentUserCanSee {
+    my $self = shift;
+    return $self->CurrentUserHasRight('ShowTicket');
+}
 
 =head2 HasRight
 
@@ -3625,7 +3651,9 @@ sub Transactions {
 
 sub TransactionCustomFields {
     my $self = shift;
-    return $self->QueueObj->TicketTransactionCustomFields;
+    my $cfs = $self->QueueObj->TicketTransactionCustomFields;
+    $cfs->SetContextObject( $self );
+    return $cfs;
 }
 
 
@@ -3687,7 +3715,6 @@ sub ACLEquivalenceObjects {
     return $self->QueueObj;
 
 }
-
 
 1;
 

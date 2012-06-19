@@ -51,8 +51,8 @@ package RT::Config;
 use strict;
 use warnings;
 
-
 use File::Spec ();
+use Symbol::Global::Name;
 
 =head1 NAME
 
@@ -122,6 +122,11 @@ can be set for each config optin:
     Callback    - subref that receives no arguments.  It returns
                   a hashref of items that are added to the rest
                   of the WidgetArguments
+ PostSet       - subref passed the RT::Config object and the current and
+                 previous setting of the config option.  This is called well
+                 before much of RT's subsystems are initialized, so what you
+                 can do here is pretty limited.  It's mostly useful for
+                 effecting the value of other config options early.
  PostLoadCheck - subref passed the RT::Config object and the current
                  setting of the config option.  Can make further checks
                  (such as seeing if a library is installed) and then change
@@ -610,6 +615,7 @@ our %META = (
             }
         }
     },
+    ReferrerWhitelist => { Type => 'ARRAY' },
     ResolveDefaultUpdateType => {
         PostLoadCheck => sub {
             my $self  = shift;
@@ -756,7 +762,22 @@ our %META = (
             }
         },
     },
-
+    LogToScreen => {
+        PostSet => sub {
+            my $self  = shift;
+            my $value = shift;
+            $self->SetFromConfig(
+                Option => \'LogToSTDERR',
+                Value  => [$value],
+                %{$self->Meta('LogToScreen')->{'Source'}}
+            );
+        },
+        PostLoadCheck => sub {
+            my $self = shift;
+            $RT::Logger->info("You set \$LogToScreen in your config, but it's been renamed to \$LogToSTDERR.  Please update your config.")
+                if $self->Meta('LogToScreen')->{'Source'}{'Package'};
+        },
+    },
     ActiveStatus => {
         Type => 'ARRAY',
         PostLoadCheck => sub {
@@ -862,9 +883,13 @@ sub LoadConfig {
         and my $site_config = $ENV{RT_SITE_CONFIG} )
     {
         $self->_LoadConfig( %args, File => $site_config );
+        # to allow load siteconfig again and again in case it's updated
+        delete $INC{ $site_config };
     } else {
         $self->_LoadConfig(%args);
+        delete $INC{$args{'File'}};
     }
+
     $args{'File'} =~ s/Site(?=Config\.pm$)//;
     $self->_LoadConfig(%args);
     return 1;
@@ -1075,6 +1100,8 @@ sub Set {
         {no warnings 'once'; no strict 'refs'; ${"RT::$name"} = $OPTIONS{$name}; }
     }
     $META{$name}->{'Type'} = $type;
+    $META{$name}->{'PostSet'}->($self, $OPTIONS{$name}, $old)
+        if $META{$name}->{'PostSet'};
     return $self->_ReturnValue( $old, $type );
 }
 
@@ -1110,7 +1137,7 @@ sub SetFromConfig {
     my $opt = $args{'Option'};
 
     my $type;
-    my $name = $self->__GetNameByRef($opt);
+    my $name = Symbol::Global::Name->find($opt);
     if ($name) {
         $type = ref $opt;
         $name =~ s/.*:://;
@@ -1168,67 +1195,6 @@ sub SetFromConfig {
     $self->Set( $name, @{ $args{'Value'} } );
 
     return 1;
-}
-
-    our %REF_SYMBOLS = (
-            SCALAR => '$',
-            ARRAY  => '@',
-            HASH   => '%',
-            CODE   => '&',
-        );
-
-{
-    my $last_pack = '';
-
-    sub __GetNameByRef {
-        my $self = shift;
-        my $ref  = shift;
-        my $pack = shift;
-        if ( !$pack && $last_pack ) {
-            my $tmp = $self->__GetNameByRef( $ref, $last_pack );
-            return $tmp if $tmp;
-        }
-        $pack ||= 'main::';
-        $pack .= '::' unless substr( $pack, -2 ) eq '::';
-
-        no strict 'refs';
-        my $name = undef;
-
-        # scan $pack's nametable(hash)
-        foreach my $k ( keys %{$pack} ) {
-
-            # The hash for main:: has a reference to itself
-            next if $k eq 'main::';
-
-            # if the entry has a trailing '::' then
-            # it is a link to another name space
-            if ( substr( $k, -2 ) eq '::') {
-                $name = $self->__GetNameByRef( $ref, $k );
-                return $name if $name;
-            }
-
-            # entry of the table with references to
-            # SCALAR, ARRAY... and other types with
-            # the same name
-            my $entry = ${$pack}{$k};
-            next unless $entry;
-
-            # get entry for type we are looking for
-            # XXX skip references to scalars or other references.
-            # Otherwie 5.10 goes boom. maybe we should skip any
-            # reference
-            next if ref($entry) eq 'SCALAR' || ref($entry) eq 'REF';
-            my $entry_ref = *{$entry}{ ref($ref) };
-            next unless $entry_ref;
-
-            # if references are equal then we've found
-            if ( $entry_ref == $ref ) {
-                $last_pack = $pack;
-                return ( $REF_SYMBOLS{ ref($ref) } || '*' ) . $pack . $k;
-            }
-        }
-        return '';
-    }
 }
 
 =head2 Metadata

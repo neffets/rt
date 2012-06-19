@@ -303,12 +303,7 @@ sub _BookmarkLimit {
     die "Invalid operator $op for __Bookmarked__ search on $field"
         unless $op =~ /^(=|!=)$/;
 
-    my @bookmarks = do {
-        my $tmp = $sb->CurrentUser->UserObj->FirstAttribute('Bookmarks');
-        $tmp = $tmp->Content if $tmp;
-        $tmp ||= {};
-        grep $_, keys %$tmp;
-    };
+    my @bookmarks = $sb->CurrentUser->UserObj->Bookmarks;
 
     return $sb->_SQLLimit(
         FIELD    => $field,
@@ -337,6 +332,7 @@ sub _BookmarkLimit {
             VALUE    => $id,
             $first? (@rest): ( ENTRYAGGREGATOR => $ea )
         );
+        $first = 0 if $first;
     }
     $sb->_CloseParen;
 }
@@ -1097,6 +1093,12 @@ sub _GroupMembersJoin {
         FIELD2          => 'GroupId',
         ENTRYAGGREGATOR => 'AND',
     );
+    $self->SUPER::Limit(
+        $args{'Left'} ? (LEFTJOIN => $alias) : (),
+        ALIAS => $alias,
+        FIELD => 'Disabled',
+        VALUE => 0,
+    );
 
     $self->{'_sql_group_members_aliases'}{ $args{'GroupsAlias'} } = $alias
         unless $args{'New'};
@@ -1261,12 +1263,25 @@ sub _WatcherMembershipLimit {
         FIELD2 => 'id'
     );
 
+    $self->Limit(
+        ALIAS => $groupmembers,
+        FIELD => 'Disabled',
+        VALUE => 0,
+    );
+
     $self->Join(
         ALIAS1 => $memberships,
         FIELD1 => 'MemberId',
         ALIAS2 => $users,
         FIELD2 => 'id'
     );
+
+    $self->Limit(
+        ALIAS => $memberships,
+        FIELD => 'Disabled',
+        VALUE => 0,
+    );
+
 
     $self->_CloseParen;
 
@@ -1604,11 +1619,8 @@ sub _CustomFieldLimit {
             $self->_CloseParen;
         }
         else {
-            my $cf = RT::CustomField->new( $self->CurrentUser );
-            $cf->Load($field);
-
             # need special treatment for Date
-            if ( $cf->Type eq 'DateTime' && $op eq '=' ) {
+            if ( $cf and $cf->Type eq 'DateTime' and $op eq '=' ) {
 
                 if ( $value =~ /:/ ) {
                     # there is time speccified.
@@ -2109,7 +2121,43 @@ sub LimitStatus {
     );
 }
 
+=head2 LimitToActiveStatus
 
+Limits the status to L<RT::Queue/ActiveStatusArray>
+
+TODO: make this respect lifecycles for the queues associated with the search
+
+=cut
+
+sub LimitToActiveStatus {
+    my $self = shift;
+
+    my @active = RT::Queue->ActiveStatusArray();
+    for my $active (@active) {
+        $self->LimitStatus(
+            VALUE => $active,
+        );
+    }
+}
+
+=head2 LimitToInactiveStatus
+
+Limits the status to L<RT::Queue/InactiveStatusArray>
+
+TODO: make this respect lifecycles for the queues associated with the search
+
+=cut
+
+sub LimitToInactiveStatus {
+    my $self = shift;
+
+    my @active = RT::Queue->InactiveStatusArray();
+    for my $active (@active) {
+        $self->LimitStatus(
+            VALUE => $active,
+        );
+    }
+}
 
 =head2 IgnoreType
 
@@ -3378,7 +3426,11 @@ sub _RestrictionsToClauses {
         # here is where we store extra data, say if it's a keyword or
         # something.  (I.e. "TYPE SPECIFIC STUFF")
 
-        push @{ $clause{$realfield} }, $data;
+        if (lc $ea eq 'none') {
+            $clause{$realfield} = [ $data ];
+        } else {
+            push @{ $clause{$realfield} }, $data;
+        }
     }
     return \%clause;
 }

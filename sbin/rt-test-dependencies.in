@@ -73,6 +73,7 @@ GetOptions(
     'with-GD',
     'with-DASHBOARDS',
     'with-USERLOGO',
+    'with-SSL-MAILGATE',
 
     'download=s',
     'repository=s',
@@ -101,6 +102,7 @@ my %default = (
     'with-GD' => @RT_GD@,
     'with-DASHBOARDS' => 1,
     'with-USERLOGO' => 1,
+    'with-SSL-MAILGATE' => @RT_SSL_MAILGATE@,
 );
 $args{$_} = $default{$_} foreach grep !exists $args{$_}, keys %default;
 
@@ -157,6 +159,10 @@ sub conclude {
                     0, $module->{error} );
             }
         }
+
+        print "\nPerl library path for @PERL@:\n";
+        print "    $_\n" for @INC;
+
         exit 1;
     }
 }
@@ -187,11 +193,13 @@ File::ShareDir
 File::Spec 0.8
 HTML::Quoted
 HTML::Scrubber 0.08
+HTML::TreeBuilder
+HTML::FormatText
 Log::Dispatch 2.23
 Sys::Syslog 0.16
 Locale::Maketext 1.06
 Locale::Maketext::Lexicon 0.32
-Locale::Maketext::Fuzzy
+Locale::Maketext::Fuzzy 0.11
 MIME::Entity 5.425
 Mail::Mailer 1.57
 Email::Address
@@ -216,6 +224,7 @@ List::MoreUtils
 Net::CIDR
 Regexp::Common::net::CIDR
 Regexp::IPv6
+Symbol::Global::Name
 .
 
 $deps{'MASON'} = [ text_to_hash( << '.') ];
@@ -243,11 +252,17 @@ CGI::Emulate::PSGI
 .
 
 $deps{'MAILGATE'} = [ text_to_hash( << '.') ];
-HTML::TreeBuilder
-HTML::FormatText
 Getopt::Long
-LWP::UserAgent
+LWP::UserAgent 6.0
 Pod::Usage
+.
+
+$deps{'SSL-MAILGATE'} = [ text_to_hash( << '.') ];
+Crypt::SSLeay
+Net::SSL
+LWP::UserAgent 6.0
+LWP::Protocol::https
+Mozilla::CA
 .
 
 $deps{'CLI'} = [ text_to_hash( << '.') ];
@@ -278,7 +293,7 @@ Test::Builder 0.90 # needed for is_passing
 Test::MockTime
 Log::Dispatch::Perl
 Test::WWW::Mechanize::PSGI
-Plack::Middleware::Test::StashWarnings
+Plack::Middleware::Test::StashWarnings 0.06
 Test::LongString
 .
 
@@ -329,6 +344,7 @@ Net::SMTP
 $deps{'DASHBOARDS'} = [ text_to_hash( << '.') ];
 HTML::RewriteAttributes 0.04
 MIME::Types
+URI 1.59
 .
 
 $deps{'GRAPHVIZ'} = [ text_to_hash( << '.') ];
@@ -427,6 +443,10 @@ sub test_dep {
             $error =~ s/\n(.*)$//s;
             $error =~ s/at \(eval \d+\) line \d+\.$//;
             undef $error if $error =~ /this is only/;
+
+            my $path = $module;
+            $path =~ s{::}{/}g;
+            undef $error if $error =~ /^Can't locate $path\.pm in \@INC/;
 
             return ( 0, $error );
         }

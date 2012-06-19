@@ -127,6 +127,7 @@ sub import {
     $class->bootstrap_config( %args );
 
     use RT;
+
     RT::LoadConfig;
 
     if (RT->Config->Get('DevelMode')) { require Module::Refresh; }
@@ -270,7 +271,7 @@ sub bootstrap_config {
 Set( \$WebDomain, "localhost");
 Set( \$WebPort,   $port);
 Set( \$WebPath,   "");
-Set( \@LexiconLanguages, qw(en zh_TW fr ja));
+Set( \@LexiconLanguages, qw(en zh_TW zh_CN fr ja));
 Set( \$RTAddressRegexp , qr/^bad_re_that_doesnt_match\$/i);
 };
     if ( $ENV{'RT_TEST_DB_SID'} ) { # oracle case
@@ -343,7 +344,7 @@ sub bootstrap_logging {
 
     print $config <<END;
 Set( \$LogToSyslog , undef);
-Set( \$LogToScreen , "warning");
+Set( \$LogToSTDERR , "warning");
 Set( \$LogToFile, 'debug' );
 Set( \$LogDir, q{$tmp{'directory'}} );
 Set( \$LogToFileNamed, 'rt.debug.log' );
@@ -409,7 +410,11 @@ sub bootstrap_db {
         $args{$forceopt}=1;
     }
 
-    return if $args{nodb};
+    # Short-circuit the rest of ourselves if we don't want a db
+    if ($args{nodb}) {
+        __drop_database();
+        return;
+    }
 
     my $db_type = RT->Config->Get('DatabaseType');
     __create_database();
@@ -556,6 +561,13 @@ sub __drop_database {
         RT::Handle->SystemDSN,
         $ENV{RT_DBA_USER}, $ENV{RT_DBA_PASSWORD}
     );
+
+    # We ignore errors intentionally by not checking the return value of
+    # DropDatabase below, so let's also suppress DBI's printing of errors when
+    # we overzealously drop.
+    local $dbh->{PrintError} = 0;
+    local $dbh->{PrintWarn} = 0;
+
     RT::Handle->DropDatabase( $dbh );
     $dbh->disconnect if $my_dbh;
 }
@@ -1010,7 +1022,7 @@ sub send_via_mailgate {
 
     my ( $status, $error_message, $ticket )
         = RT::Interface::Email::Gateway( {%args, message => $message} );
-    return ( $status, $ticket->id );
+    return ( $status, $ticket ? $ticket->id : 0 );
 
 }
 
@@ -1276,8 +1288,10 @@ sub started_ok {
 
     require RT::Test::Web;
 
-    if ($rttest_opt{nodb}) {
-        die "you are trying to use a test web server without db, try use noinitialdata => 1 instead";
+    if ($rttest_opt{nodb} and not $rttest_opt{server_ok}) {
+        die "You are trying to use a test web server without a database. "
+           ."You may want noinitialdata => 1 instead. "
+           ."Pass server_ok => 1 if you know what you're doing.";
     }
 
 
@@ -1298,11 +1312,31 @@ sub test_app {
     my $self = shift;
     my %server_opt = @_;
 
-    require RT::Interface::Web::Handler;
-    my $app = RT::Interface::Web::Handler->PSGIApp;
+    my $app;
+
+    my $warnings = "";
+    open( my $warn_fh, ">", \$warnings );
+    local *STDERR = $warn_fh;
+
+    if ($server_opt{variant} and $server_opt{variant} eq 'rt-server') {
+        $app = do {
+            my $file = "$RT::SbinPath/rt-server";
+            my $psgi = do $file;
+            unless ($psgi) {
+                die "Couldn't parse $file: $@" if $@;
+                die "Couldn't do $file: $!"    unless defined $psgi;
+                die "Couldn't run $file"       unless $psgi;
+            }
+            $psgi;
+        };
+    } else {
+        require RT::Interface::Web::Handler;
+        $app = RT::Interface::Web::Handler->PSGIApp;
+    }
 
     require Plack::Middleware::Test::StashWarnings;
-    $app = Plack::Middleware::Test::StashWarnings->wrap($app);
+    my $stashwarnings = Plack::Middleware::Test::StashWarnings->new;
+    $app = $stashwarnings->wrap($app);
 
     if ($server_opt{basic_auth}) {
         require Plack::Middleware::Auth::Basic;
@@ -1314,6 +1348,10 @@ sub test_app {
             }
         );
     }
+
+    close $warn_fh;
+    $stashwarnings->add_warning( $warnings ) if $warnings;
+
     return $app;
 }
 
@@ -1346,7 +1384,8 @@ sub start_plack_server {
         my $Tester = Test::Builder->new;
         $Tester->ok(1, "started plack server ok");
 
-        __reconnect_rt();
+        __reconnect_rt()
+            unless $rttest_opt{nodb};
         return ("http://localhost:$port", RT::Test::Web->new);
     }
 

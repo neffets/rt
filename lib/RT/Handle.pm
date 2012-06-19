@@ -122,15 +122,11 @@ sub Connect {
         ($version) = $version =~ /^(\d+\.\d+)/;
         $self->dbh->do("SET NAMES 'utf8'") if $version >= 4.1;
     }
-
-
-    if ( $db_type eq 'Pg' ) {
+    elsif ( $db_type eq 'Pg' ) {
         my $version = $self->DatabaseVersion;
         ($version) = $version =~ /^(\d+\.\d+)/;
         $self->dbh->do("SET bytea_output = 'escape'") if $version >= 9.0;
     }
-
-
 
     $self->dbh->{'LongReadLen'} = RT->Config->Get('MaxAttachmentSize');
 }
@@ -226,14 +222,12 @@ sub CheckIntegrity {
     my $self = shift;
     $self = new $self unless ref $self;
 
-    do {
+    unless ($RT::Handle and $RT::Handle->dbh) {
         local $@;
         unless ( eval { RT::ConnectToDatabase(); 1 } ) {
             return (0, 'no connection', "$@");
         }
-    };
-
-    RT::InitLogging();
+    }
 
     require RT::CurrentUser;
     my $test_user = RT::CurrentUser->new;
@@ -748,6 +742,10 @@ sub InsertData {
     my $self     = shift;
     my $datafile = shift;
     my $root_password = shift;
+    my %args     = (
+        disconnect_after => 1,
+        @_
+    );
 
     # Slurp in stuff to insert from the datafile. Possible things to go in here:-
     our (@Groups, @Users, @ACL, @Queues, @ScripActions, @ScripConditions,
@@ -817,6 +815,7 @@ sub InsertData {
     if ( @Users ) {
         $RT::Logger->debug("Creating users...");
         foreach my $item (@Users) {
+            my $member_of = delete $item->{'MemberOf'};
             if ( $item->{'Name'} eq 'root' && $root_password ) {
                 $item->{'Password'} = $root_password;
             }
@@ -826,6 +825,37 @@ sub InsertData {
                 $RT::Logger->error( $msg );
             } else {
                 $RT::Logger->debug( $return ."." );
+            }
+            if ( $member_of ) {
+                $member_of = [ $member_of ] unless ref $member_of eq 'ARRAY';
+                foreach( @$member_of ) {
+                    my $parent = RT::Group->new($RT::SystemUser);
+                    if ( ref $_ eq 'HASH' ) {
+                        $parent->LoadByCols( %$_ );
+                    }
+                    elsif ( !ref $_ ) {
+                        $parent->LoadUserDefinedGroup( $_ );
+                    }
+                    else {
+                        $RT::Logger->error(
+                            "(Error: wrong format of MemberOf field."
+                            ." Should be name of user defined group or"
+                            ." hash reference with 'column => value' pairs."
+                            ." Use array reference to add to multiple groups)"
+                        );
+                        next;
+                    }
+                    unless ( $parent->Id ) {
+                        $RT::Logger->error("(Error: couldn't load group to add member)");
+                        next;
+                    }
+                    my ( $return, $msg ) = $parent->AddMember( $new_entry->Id );
+                    unless ( $return ) {
+                        $RT::Logger->error( $msg );
+                    } else {
+                        $RT::Logger->debug( $return ."." );
+                    }
+                }
             }
         }
         $RT::Logger->debug("done.");
@@ -1071,8 +1101,14 @@ sub InsertData {
         $RT::Logger->debug("done.");
     }
 
-    my $db_type = RT->Config->Get('DatabaseType');
-    $RT::Handle->Disconnect() unless $db_type eq 'SQLite';
+    # XXX: This disconnect doesn't really belong here; it's a relict from when
+    # this method was extracted from rt-setup-database.  However, too much
+    # depends on it to change without significant testing.  At the very least,
+    # we can provide a way to skip the side-effect.
+    if ( $args{disconnect_after} ) {
+        my $db_type = RT->Config->Get('DatabaseType');
+        $RT::Handle->Disconnect() unless $db_type eq 'SQLite';
+    }
 
     $RT::Logger->debug("Done setting up database content.");
 

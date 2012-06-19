@@ -77,9 +77,6 @@ use RT::Groups;
 use RT::ACL;
 use RT::Interface::Email;
 
-our @DEFAULT_ACTIVE_STATUS = qw(new open stalled);
-our @DEFAULT_INACTIVE_STATUS = qw(resolved rejected deleted);  
-
 # $self->loc('new'); # For the string extractor to get a string to localize
 # $self->loc('open'); # For the string extractor to get a string to localize
 # $self->loc('stalled'); # For the string extractor to get a string to localize
@@ -692,6 +689,7 @@ sub TicketTransactionCustomFields {
 
     my $cfs = RT::CustomFields->new( $self->CurrentUser );
     if ( $self->CurrentUserHasRight('SeeQueue') ) {
+        $cfs->SetContextObject( $self );
 	$cfs->LimitToGlobalOrObjectId( $self->Id );
 	$cfs->LimitToLookupType( 'RT::Queue-RT::Ticket-RT::Transaction' );
         $cfs->ApplySortOrder;
@@ -1249,6 +1247,17 @@ sub CurrentUserHasRight {
 
 }
 
+=head2 CurrentUserCanSee
+
+Returns true if the current user can see the queue, using SeeQueue
+
+=cut
+
+sub CurrentUserCanSee {
+    my $self = shift;
+
+    return $self->CurrentUserHasRight('SeeQueue');
+}
 
 
 =head2 HasRight

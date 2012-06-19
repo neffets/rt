@@ -1,4 +1,3 @@
-#!/usr/bin/perl
 
 use strict;
 use warnings;
@@ -85,7 +84,7 @@ sub rewrite_rtconfig
 
     # generic logging
     config_set( '$LogToSyslog'    , undef );
-    config_set( '$LogToScreen'    , 'error' );
+    config_set( '$LogToSTDERR'    , 'error' );
     config_set( '$LogStackTraces' , 'crit' );
     # logging to standalone file
     config_set( '$LogToFile'      , 'debug' );

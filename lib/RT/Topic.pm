@@ -85,7 +85,7 @@ sub Create {
         $obj = $RT::System unless $obj->id;
     }
 
-    return ( 0, $self->loc("Permission denied"))
+    return ( 0, $self->loc("Permission Denied"))
       unless ( $self->CurrentUser->HasRight(
                                             Right        => "AdminTopics",
                                             Object       => $obj,
